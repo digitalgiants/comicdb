@@ -1,0 +1,15 @@
+{
+  "name": "comic-vault",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Containerized multi-user comic book vault.",
+  "scripts": {
+    "dev": "npm run dev --workspace frontend",
+    "build": "npm run build --workspaces",
+    "lint": "npm run lint --workspaces"
+  },
+  "workspaces": [
+    "frontend",
+    "backend"
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "name": "comic-vault-backend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "prisma generate && tsc",
+    "lint": "tsc --noEmit",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:generate": "prisma generate"
+  },
+  "dependencies": {
+    "@fastify/cors": "latest",
+    "@fastify/jwt": "latest",
+    "@fastify/oauth2": "latest",
+    "@prisma/adapter-pg": "latest",
+    "@prisma/client": "latest",
+    "bcryptjs": "latest",
+    "dotenv": "latest",
+    "fastify": "latest",
+    "pg": "latest",
+    "prisma": "latest",
+    "zod": "latest"
+  },
+  "devDependencies": {
+    "@types/pg": "latest",
+    "@types/node": "latest",
+    "tsx": "latest",
+    "typescript": "latest"
+  }
+}
