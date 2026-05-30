@@ -39,7 +39,7 @@ services:
     depends_on:
       - backend
     ports:
-      - "8083:80"
+      - "8090:80"
 
 volumes:
   comicvault_db:

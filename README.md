@@ -17,7 +17,7 @@ A responsive, containerized comic book vault with per-user inventories, local or
 podman-compose up --build
 ```
 
-3. Open `http://localhost:8083`.
+3. Open `http://localhost:8090`.
 
 The first registered local account is automatically made an admin. Later users default to the `USER` role.
 
@@ -27,7 +27,7 @@ For a hosted setup, point Caddy at the frontend container and keep the backend r
 
 ```caddyfile
 vault.example.com {
-  reverse_proxy comicvault-frontend:80
+  reverse_proxy 127.0.0.1:8090
 }
 
 api.vault.example.com {
