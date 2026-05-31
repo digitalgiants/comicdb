@@ -837,10 +837,15 @@ function Stat({ label, value }: { label: string; value: string }) {
 }
 
 async function api<T>(path: string, token?: string, init: RequestInit = {}): Promise<T> {
+  const method = (init.method ?? "GET").toUpperCase();
+  const sendsJson = method === "POST" || method === "PUT" || method === "PATCH";
+  const body = init.body ?? (sendsJson ? "{}" : undefined);
+
   const response = await fetch(`${API_BASE}${path}`, {
     ...init,
+    body,
     headers: {
-      "Content-Type": "application/json",
+      ...(body ? { "Content-Type": "application/json" } : {}),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...init.headers
     }

@@ -25,14 +25,18 @@ app.setErrorHandler((error, _request, reply) => {
   }
   app.log.error(error);
 
+  const statusCode = "statusCode" in error && typeof error.statusCode === "number" ? error.statusCode : 500;
   const message = error instanceof Error ? error.message : "Something went wrong.";
+
   if (message.includes("coverImageUrl") || message.includes("does not exist")) {
     return reply.code(500).send({
       message: "Database schema is out of date. Redeploy the backend so migrations can run."
     });
   }
 
-  return reply.code(500).send({ message: "Something went wrong." });
+  return reply.code(statusCode).send({
+    message: statusCode >= 500 ? "Something went wrong." : message
+  });
 });
 
 app.get("/health", async () => ({ ok: true }));
