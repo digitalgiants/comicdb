@@ -8,7 +8,13 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8084";
 const COMIC_IMPORT_HEADERS =
   "name, number, Date, Volume, direct, Publisher, no. of books, print, print ratio, Cover, variant, writer, artist, Pencils, inker, cover artist, average price, price paid, buy date, sell date, point of purchase, signed, remarked, notes";
 
-const COMIC_FORM_FIELDS = [
+type ComicFormField = {
+  key: string;
+  label: string;
+  type?: "number" | "textarea";
+};
+
+const COMIC_FORM_FIELDS: ComicFormField[] = [
   { key: "name", label: "Name" },
   { key: "number", label: "Number" },
   { key: "date", label: "Date" },
@@ -25,15 +31,15 @@ const COMIC_FORM_FIELDS = [
   { key: "pencils", label: "Pencils" },
   { key: "inker", label: "Inker" },
   { key: "coverArtist", label: "Cover artist" },
-  { key: "averagePrice", label: "Average price", type: "number" as const },
-  { key: "pricePaid", label: "Price paid", type: "number" as const },
+  { key: "averagePrice", label: "Average price", type: "number" },
+  { key: "pricePaid", label: "Price paid", type: "number" },
   { key: "buyDate", label: "Buy date" },
   { key: "sellDate", label: "Sell date" },
   { key: "pointOfPurchase", label: "Point of purchase" },
   { key: "signed", label: "Signed" },
   { key: "remarked", label: "Remarked" },
-  { key: "notes", label: "Notes", type: "textarea" as const }
-] as const;
+  { key: "notes", label: "Notes", type: "textarea" }
+];
 
 type Role = "ADMIN" | "USER";
 
