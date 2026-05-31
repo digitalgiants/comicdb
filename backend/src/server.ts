@@ -24,6 +24,14 @@ app.setErrorHandler((error, _request, reply) => {
     return reply.code(400).send({ message: "Please check the form fields.", issues: error.issues });
   }
   app.log.error(error);
+
+  const message = error instanceof Error ? error.message : "Something went wrong.";
+  if (message.includes("coverImageUrl") || message.includes("does not exist")) {
+    return reply.code(500).send({
+      message: "Database schema is out of date. Redeploy the backend so migrations can run."
+    });
+  }
+
   return reply.code(500).send({ message: "Something went wrong." });
 });
 

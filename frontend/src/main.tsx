@@ -89,7 +89,7 @@ type SearchResult = {
 } & ComicDraft;
 type ImportRow = Record<string, unknown>;
 type ImportResult = { imported: number; skipped: number; errors: { row: number; message: string }[] };
-type RefreshResult = { updated: number; skipped: number; total: number };
+type RefreshResult = { updated: number; skipped: number; total: number; errors?: { id: string; label: string; message: string }[] };
 
 const emptyComic: ComicDraft = {
   name: "",
@@ -558,7 +558,12 @@ function VaultApp({ token, user, onSignOut }: { token: string; user: User; onSig
     try {
       const result = await api<RefreshResult>("/comics/refresh-covers", token, { method: "POST" });
       await loadComics();
-      setImportMessage(`Fetched cover images for ${result.updated} of ${result.total} comics.${result.skipped ? ` ${result.skipped} skipped.` : ""}`);
+      const errorNote = result.errors?.length
+        ? ` ${result.errors.length} error${result.errors.length === 1 ? "" : "s"}.`
+        : result.skipped
+          ? ` ${result.skipped} skipped.`
+          : "";
+      setImportMessage(`Fetched cover images for ${result.updated} of ${result.total} comics.${errorNote}`);
     } catch (err) {
       setImportMessage(err instanceof Error ? err.message : "Cover image refresh failed.");
     } finally {

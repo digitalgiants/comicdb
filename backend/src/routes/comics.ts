@@ -11,7 +11,7 @@ import {
 import { requireAuth } from "../auth.js";
 import { env } from "../env.js";
 import { prisma } from "../prisma.js";
-import { findComicVineCover, searchComicVine } from "../services/comicVine.js";
+import { findComicVineCoverWithDelay, searchComicVine } from "../services/comicVine.js";
 import { estimateAveragePrice } from "../services/ebay.js";
 
 const searchFields = [
@@ -169,6 +169,7 @@ export async function comicRoutes(app: FastifyInstance) {
     const comics = await prisma.comic.findMany({ where: { userId: request.currentUser!.id } });
     let updated = 0;
     let skipped = 0;
+    const errors: { id: string; label: string; message: string }[] = [];
 
     for (const comic of comics) {
       const label = comicPriceSearchLabel(comic);
@@ -177,20 +178,37 @@ export async function comicRoutes(app: FastifyInstance) {
         continue;
       }
 
-      const coverImageUrl = await findComicVineCover(label);
-      if (!coverImageUrl) {
-        skipped += 1;
-        continue;
-      }
+      try {
+        const coverImageUrl = await findComicVineCoverWithDelay(label);
+        if (!coverImageUrl) {
+          skipped += 1;
+          continue;
+        }
 
-      await prisma.comic.update({
-        where: { id: comic.id },
-        data: { coverImageUrl }
-      });
-      updated += 1;
+        await prisma.comic.update({
+          where: { id: comic.id },
+          data: { coverImageUrl }
+        });
+        updated += 1;
+      } catch (error) {
+        skipped += 1;
+        const message = error instanceof Error ? error.message : "Cover lookup failed.";
+        errors.push({ id: comic.id, label, message });
+        request.log.error({ err: error, comicId: comic.id, label }, "Cover refresh failed for comic");
+      }
     }
 
-    return { updated, skipped, total: comics.length };
+    if (!updated && comics.length > 0 && errors.length === comics.length) {
+      return reply.code(500).send({
+        message: errors[0]?.message ?? "Cover refresh failed for every comic.",
+        updated,
+        skipped,
+        total: comics.length,
+        errors
+      });
+    }
+
+    return { updated, skipped, total: comics.length, errors };
   });
 
   app.put("/comics/:id", { preHandler: requireAuth }, async (request, reply) => {
