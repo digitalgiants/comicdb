@@ -78,3 +78,8 @@ export async function searchComicVine(query: string): Promise<ComicSearchResult[
     };
   });
 }
+
+export async function findComicVineCover(query: string): Promise<string | null> {
+  const [first] = await searchComicVine(query);
+  return first?.coverImageUrl ?? null;
+}

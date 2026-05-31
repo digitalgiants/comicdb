@@ -42,6 +42,7 @@ model Comic {
   pencils           String?
   inker             String?
   coverArtist       String?
+  coverImageUrl     String?
   averagePrice      Decimal? @db.Decimal(10, 2)
   pricePaid         Decimal? @db.Decimal(10, 2)
   buyDate           String?

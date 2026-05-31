@@ -60,6 +60,18 @@ const optionalDecimal = z.preprocess((value) => {
   return Number.isFinite(parsed) ? parsed : null;
 }, z.number().min(0).nullable());
 
+const optionalUrl = z.preprocess((value) => {
+  if (value === "" || value === undefined || value === null) return null;
+  const text = String(value).trim();
+  if (!text) return null;
+  try {
+    new URL(text);
+    return text;
+  } catch {
+    return null;
+  }
+}, z.string().url().nullable());
+
 export const comicFieldSchema = z.object({
   name: z.string().nullable().optional(),
   number: z.string().nullable().optional(),
@@ -77,6 +89,7 @@ export const comicFieldSchema = z.object({
   pencils: z.string().nullable().optional(),
   inker: z.string().nullable().optional(),
   coverArtist: z.string().nullable().optional(),
+  coverImageUrl: optionalUrl.optional(),
   averagePrice: optionalDecimal.optional(),
   pricePaid: optionalDecimal.optional(),
   buyDate: z.string().nullable().optional(),
@@ -144,6 +157,7 @@ export function comicDataFromFields(input: ComicFields) {
     pencils: input.pencils,
     inker: input.inker,
     coverArtist: input.coverArtist,
+    coverImageUrl: input.coverImageUrl,
     averagePrice: input.averagePrice,
     pricePaid: input.pricePaid,
     buyDate: input.buyDate,

@@ -1,0 +1,1 @@
+ALTER TABLE "Comic" ADD COLUMN IF NOT EXISTS "coverImageUrl" TEXT;

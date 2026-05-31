@@ -9,8 +9,9 @@ import {
   type ComicFields
 } from "../comicFields.js";
 import { requireAuth } from "../auth.js";
+import { env } from "../env.js";
 import { prisma } from "../prisma.js";
-import { searchComicVine } from "../services/comicVine.js";
+import { findComicVineCover, searchComicVine } from "../services/comicVine.js";
 import { estimateAveragePrice } from "../services/ebay.js";
 
 const searchFields = [
@@ -47,7 +48,7 @@ export async function comicRoutes(app: FastifyInstance) {
             }
           : {})
       },
-      orderBy: { createdAt: "desc" }
+      orderBy: [{ name: "asc" }, { number: "asc" }, { volume: "asc" }]
     });
   });
 
@@ -128,6 +129,70 @@ export async function comicRoutes(app: FastifyInstance) {
     };
   });
 
+  app.post("/comics/refresh-prices", { preHandler: requireAuth }, async (request, reply) => {
+    if (!env.ebayClientId || !env.ebayClientSecret) {
+      return reply.code(503).send({ message: "eBay API credentials are not configured." });
+    }
+
+    const comics = await prisma.comic.findMany({ where: { userId: request.currentUser!.id } });
+    let updated = 0;
+    let skipped = 0;
+
+    for (const comic of comics) {
+      const label = comicPriceSearchLabel(comic);
+      if (!label) {
+        skipped += 1;
+        continue;
+      }
+
+      const price = await estimateAveragePrice(label);
+      if (price == null) {
+        skipped += 1;
+        continue;
+      }
+
+      await prisma.comic.update({
+        where: { id: comic.id },
+        data: { averagePrice: price }
+      });
+      updated += 1;
+    }
+
+    return { updated, skipped, total: comics.length };
+  });
+
+  app.post("/comics/refresh-covers", { preHandler: requireAuth }, async (request, reply) => {
+    if (!env.comicVineApiKey) {
+      return reply.code(503).send({ message: "Comic Vine API key is not configured." });
+    }
+
+    const comics = await prisma.comic.findMany({ where: { userId: request.currentUser!.id } });
+    let updated = 0;
+    let skipped = 0;
+
+    for (const comic of comics) {
+      const label = comicPriceSearchLabel(comic);
+      if (!label) {
+        skipped += 1;
+        continue;
+      }
+
+      const coverImageUrl = await findComicVineCover(label);
+      if (!coverImageUrl) {
+        skipped += 1;
+        continue;
+      }
+
+      await prisma.comic.update({
+        where: { id: comic.id },
+        data: { coverImageUrl }
+      });
+      updated += 1;
+    }
+
+    return { updated, skipped, total: comics.length };
+  });
+
   app.put("/comics/:id", { preHandler: requireAuth }, async (request, reply) => {
     const params = z.object({ id: z.string() }).parse(request.params);
     const input = comicFieldSchema.parse(request.body);
@@ -153,9 +218,17 @@ export async function comicRoutes(app: FastifyInstance) {
     return searchComicVine(query.q);
   });
 
-  app.get("/search/price", { preHandler: requireAuth }, async (request) => {
+  app.get("/search/price", { preHandler: requireAuth }, async (request, reply) => {
     const query = z.object({ q: z.string().min(2) }).parse(request.query);
+    if (!env.ebayClientId || !env.ebayClientSecret) {
+      return reply.code(503).send({ message: "eBay API credentials are not configured.", price: null });
+    }
+
     const price = await estimateAveragePrice(query.q);
+    if (price == null) {
+      return { price: null, message: "No matching eBay listings found for that comic." };
+    }
+
     return { price };
   });
 }

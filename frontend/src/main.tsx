@@ -69,6 +69,7 @@ type Comic = {
   pencils?: string | null;
   inker?: string | null;
   coverArtist?: string | null;
+  coverImageUrl?: string | null;
   averagePrice?: string | number | null;
   pricePaid?: string | number | null;
   buyDate?: string | null;
@@ -88,6 +89,7 @@ type SearchResult = {
 } & ComicDraft;
 type ImportRow = Record<string, unknown>;
 type ImportResult = { imported: number; skipped: number; errors: { row: number; message: string }[] };
+type RefreshResult = { updated: number; skipped: number; total: number };
 
 const emptyComic: ComicDraft = {
   name: "",
@@ -106,6 +108,7 @@ const emptyComic: ComicDraft = {
   pencils: "",
   inker: "",
   coverArtist: "",
+  coverImageUrl: "",
   averagePrice: "",
   pricePaid: "",
   buyDate: "",
@@ -123,6 +126,140 @@ function currency(value: string | number | null | undefined) {
 function comicDisplayName(comic: Pick<Comic, "name" | "number" | "volume">) {
   const issue = comic.number ? `#${comic.number}` : "";
   return [comic.name, issue, comic.volume].filter(Boolean).join(" ") || "Untitled comic";
+}
+
+function sortComicsAlphabetically(comics: Comic[]) {
+  return [...comics].sort((left, right) => {
+    const nameCompare = (left.name ?? "").localeCompare(right.name ?? "", undefined, { sensitivity: "base" });
+    if (nameCompare !== 0) return nameCompare;
+    const numberCompare = (left.number ?? "").localeCompare(right.number ?? "", undefined, { numeric: true, sensitivity: "base" });
+    if (numberCompare !== 0) return numberCompare;
+    return (left.volume ?? "").localeCompare(right.volume ?? "", undefined, { sensitivity: "base" });
+  });
+}
+
+type PriceIndexPoint = {
+  label: string;
+  cumulativePaid: number;
+  cumulativeAverage: number;
+  priceIndex: number;
+};
+
+function buildPriceIndex(comics: Comic[]): PriceIndexPoint[] {
+  let cumulativePaid = 0;
+  let cumulativeAverage = 0;
+
+  return sortComicsAlphabetically(comics).map((comic) => {
+    cumulativePaid += Number(comic.pricePaid ?? 0);
+    cumulativeAverage += Number(comic.averagePrice ?? 0);
+    const priceIndex = cumulativePaid > 0 ? (cumulativeAverage / cumulativePaid) * 100 : 100;
+    return {
+      label: comicDisplayName(comic),
+      cumulativePaid,
+      cumulativeAverage,
+      priceIndex
+    };
+  });
+}
+
+function PriceIndexChart({ comics }: { comics: Comic[] }) {
+  const points = useMemo(() => buildPriceIndex(comics), [comics]);
+  if (!points.length) {
+    return (
+      <section className="panel price-index-panel">
+        <h2>Collection price index</h2>
+        <p className="muted">Import or add comics to see your collection value chart.</p>
+      </section>
+    );
+  }
+
+  const width = 960;
+  const height = 280;
+  const pad = { top: 24, right: 24, bottom: 48, left: 64 };
+  const chartWidth = width - pad.left - pad.right;
+  const chartHeight = height - pad.top - pad.bottom;
+  const maxValue = Math.max(
+    ...points.map((point) => point.cumulativeAverage),
+    ...points.map((point) => point.cumulativePaid),
+    1
+  );
+  const maxIndex = Math.max(...points.map((point) => point.priceIndex), 100);
+  const minIndex = Math.min(...points.map((point) => point.priceIndex), 100);
+
+  const xStep = points.length > 1 ? chartWidth / (points.length - 1) : 0;
+  const xAt = (index: number) => pad.left + (points.length > 1 ? index * xStep : chartWidth / 2);
+  const yValue = (value: number) => pad.top + chartHeight - (value / maxValue) * chartHeight;
+  const yIndex = (value: number) => {
+    const span = maxIndex - minIndex || 1;
+    return pad.top + chartHeight - ((value - minIndex) / span) * chartHeight;
+  };
+
+  const linePath = (values: number[], scale: (value: number) => number) =>
+    points.map((_, index) => `${index === 0 ? "M" : "L"} ${xAt(index).toFixed(1)} ${scale(values[index]).toFixed(1)}`).join(" ");
+
+  const paidPath = linePath(
+    points.map((point) => point.cumulativePaid),
+    yValue
+  );
+  const averagePath = linePath(
+    points.map((point) => point.cumulativeAverage),
+    yValue
+  );
+  const indexPath = linePath(
+    points.map((point) => point.priceIndex),
+    yIndex
+  );
+
+  const yTicks = 4;
+  const valueTicks = Array.from({ length: yTicks + 1 }, (_, index) => (maxValue / yTicks) * index);
+  const indexTicks = Array.from({ length: yTicks + 1 }, (_, index) => minIndex + ((maxIndex - minIndex) / yTicks) * index);
+  const labelStride = Math.max(1, Math.ceil(points.length / 8));
+
+  return (
+    <section className="panel price-index-panel">
+      <div className="price-index-header">
+        <h2>Collection price index</h2>
+        <div className="price-index-legend">
+          <span className="legend-item paid">Cumulative paid</span>
+          <span className="legend-item average">Cumulative average value</span>
+          <span className="legend-item index">Price index (avg / paid × 100)</span>
+        </div>
+      </div>
+      <svg className="price-index-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Collection price index chart">
+        {valueTicks.map((tick) => (
+          <g key={tick}>
+            <line x1={pad.left} x2={width - pad.right} y1={yValue(tick)} y2={yValue(tick)} className="chart-grid" />
+            <text x={pad.left - 10} y={yValue(tick) + 4} className="chart-axis-label" textAnchor="end">
+              {currency(tick)}
+            </text>
+          </g>
+        ))}
+        {indexTicks.map((tick) => (
+          <text key={`index-${tick}`} x={width - pad.right + 8} y={yIndex(tick) + 4} className="chart-axis-label index-axis" textAnchor="start">
+            {tick.toFixed(0)}
+          </text>
+        ))}
+        <path d={paidPath} className="chart-line paid" fill="none" />
+        <path d={averagePath} className="chart-line average" fill="none" />
+        <path d={indexPath} className="chart-line index" fill="none" />
+        {points.map((point, index) => (
+          <g key={`${point.label}-${index}`}>
+            <circle cx={xAt(index)} cy={yValue(point.cumulativeAverage)} r="3.5" className="chart-dot average">
+              <title>{`${point.label}\nAverage total: ${currency(point.cumulativeAverage)}\nPaid total: ${currency(point.cumulativePaid)}\nIndex: ${point.priceIndex.toFixed(1)}`}</title>
+            </circle>
+            {index % labelStride === 0 || index === points.length - 1 ? (
+              <text x={xAt(index)} y={height - 16} className="chart-axis-label" textAnchor="middle">
+                {index + 1}
+              </text>
+            ) : null}
+          </g>
+        ))}
+        <text x={width / 2} y={height - 2} className="chart-axis-title" textAnchor="middle">
+          Comics in alphabetical order
+        </text>
+      </svg>
+    </section>
+  );
 }
 
 function comicPriceSearchLabel(comic: ComicDraft) {
@@ -316,6 +453,10 @@ function VaultApp({ token, user, onSignOut }: { token: string; user: User; onSig
   const [message, setMessage] = useState("");
   const [importMessage, setImportMessage] = useState("");
   const [importing, setImporting] = useState(false);
+  const [refreshingPrices, setRefreshingPrices] = useState(false);
+  const [refreshingCovers, setRefreshingCovers] = useState(false);
+
+  const sortedComics = useMemo(() => sortComicsAlphabetically(comics), [comics]);
 
   const totals = useMemo(() => {
     const averageValue = comics.reduce((sum, comic) => sum + Number(comic.averagePrice ?? 0), 0);
@@ -341,9 +482,23 @@ function VaultApp({ token, user, onSignOut }: { token: string; user: User; onSig
 
   async function estimatePrice(nextDraft = draft) {
     const label = comicPriceSearchLabel(nextDraft);
-    if (!label) return;
-    const data = await api<{ price: number | null }>(`/search/price?q=${encodeURIComponent(label)}`, token);
-    if (data.price != null) setDraft((current) => ({ ...current, averagePrice: data.price ?? "" }));
+    if (label.length < 2) {
+      setMessage("Add a name (and ideally number or publisher) before fetching average price.");
+      return;
+    }
+
+    try {
+      setMessage("");
+      const data = await api<{ price: number | null; message?: string }>(`/search/price?q=${encodeURIComponent(label)}`, token);
+      if (data.price == null) {
+        setMessage(data.message ?? "No average price found for that comic.");
+        return;
+      }
+      setDraft((current) => ({ ...current, averagePrice: data.price ?? "" }));
+      setMessage(`Average price: ${currency(data.price)}`);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Average price lookup failed.");
+    }
   }
 
   async function saveComic(event: FormEvent) {
@@ -383,6 +538,34 @@ function VaultApp({ token, user, onSignOut }: { token: string; user: User; onSig
     }
   }
 
+  async function refreshAllPrices() {
+    setImportMessage("");
+    setRefreshingPrices(true);
+    try {
+      const result = await api<RefreshResult>("/comics/refresh-prices", token, { method: "POST" });
+      await loadComics();
+      setImportMessage(`Updated average price for ${result.updated} of ${result.total} comics.${result.skipped ? ` ${result.skipped} skipped.` : ""}`);
+    } catch (err) {
+      setImportMessage(err instanceof Error ? err.message : "Average price refresh failed.");
+    } finally {
+      setRefreshingPrices(false);
+    }
+  }
+
+  async function refreshAllCovers() {
+    setImportMessage("");
+    setRefreshingCovers(true);
+    try {
+      const result = await api<RefreshResult>("/comics/refresh-covers", token, { method: "POST" });
+      await loadComics();
+      setImportMessage(`Fetched cover images for ${result.updated} of ${result.total} comics.${result.skipped ? ` ${result.skipped} skipped.` : ""}`);
+    } catch (err) {
+      setImportMessage(err instanceof Error ? err.message : "Cover image refresh failed.");
+    } finally {
+      setRefreshingCovers(false);
+    }
+  }
+
   function editComic(comic: Comic) {
     setEditingId(comic.id);
     setDraft(draftFromComic(comic));
@@ -401,7 +584,8 @@ function VaultApp({ token, user, onSignOut }: { token: string; user: User; onSig
       artist: result.artist ?? "",
       pencils: result.pencils ?? "",
       inker: result.inker ?? "",
-      coverArtist: result.coverArtist ?? ""
+      coverArtist: result.coverArtist ?? "",
+      coverImageUrl: result.coverImageUrl ?? ""
     };
     setDraft(nextDraft);
     estimatePrice(nextDraft);
@@ -431,12 +615,23 @@ function VaultApp({ token, user, onSignOut }: { token: string; user: User; onSig
         <AdminPanel token={token} />
       ) : (
         <>
+          <PriceIndexChart comics={comics} />
+
           <section className="dashboard">
             <Stat label="Books" value={String(comics.length)} />
             <Stat label="Average value" value={currency(totals.averageValue)} />
             <Stat label="Paid" value={currency(totals.paidValue)} />
             <Stat label="Difference" value={currency(totals.gain)} />
           </section>
+
+          <div className="inventory-toolbar">
+            <button className="secondary" type="button" onClick={refreshAllPrices} disabled={refreshingPrices || !comics.length}>
+              {refreshingPrices ? "Refreshing prices..." : "Refresh average prices"}
+            </button>
+            <button className="secondary" type="button" onClick={refreshAllCovers} disabled={refreshingCovers || !comics.length}>
+              {refreshingCovers ? "Fetching covers..." : "Fetch cover images"}
+            </button>
+          </div>
 
           <section className="workspace">
             <div className="panel form-panel">
@@ -475,10 +670,10 @@ function VaultApp({ token, user, onSignOut }: { token: string; user: User; onSig
               {importMessage && <p className="import-message">{importMessage}</p>}
               <p className="import-hint muted">CSV or JSON columns: {COMIC_IMPORT_HEADERS}</p>
               <div className="comic-grid">
-                {comics.map((comic) => (
+                {sortedComics.map((comic) => (
                   <article className="comic-card" key={comic.id}>
                     <div className="cover-frame">
-                      <Vault size={48} />
+                      {comic.coverImageUrl ? <img src={comic.coverImageUrl} alt="" /> : <Vault size={48} />}
                     </div>
                     <div className="comic-body">
                       <h3>{comicDisplayName(comic)}</h3>
