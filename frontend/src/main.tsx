@@ -131,26 +131,26 @@ function comicPriceSearchLabel(comic: ComicDraft) {
 }
 
 function normalizeDraftForSave(draft: ComicDraft): ComicDraft {
-  const next = { ...draft };
+  const next: Record<string, string | number | null | undefined> = { ...draft };
   for (const field of COMIC_FORM_FIELDS) {
-    const value = next[field.key as keyof ComicDraft];
+    const value = next[field.key];
     if (field.type === "number") {
-      next[field.key as keyof ComicDraft] = value === "" || value == null ? null : Number(value);
+      next[field.key] = value === "" || value == null ? null : Number(value);
     } else if (value === "") {
-      next[field.key as keyof ComicDraft] = null;
+      next[field.key] = null;
     }
   }
-  return next;
+  return next as ComicDraft;
 }
 
 function draftFromComic(comic: Comic): ComicDraft {
-  const draft = { ...emptyComic };
+  const draft: Record<string, string | number | null | undefined> = { ...emptyComic };
   for (const field of COMIC_FORM_FIELDS) {
     const value = comic[field.key as keyof Comic];
-    draft[field.key as keyof ComicDraft] =
+    draft[field.key] =
       field.type === "number" ? (value == null || value === "" ? "" : Number(value)) : (value ?? "");
   }
-  return draft;
+  return draft as ComicDraft;
 }
 
 function parseCsvLine(line: string) {
