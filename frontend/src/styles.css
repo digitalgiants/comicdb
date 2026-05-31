@@ -267,6 +267,43 @@ select:focus {
   margin-bottom: 14px;
 }
 
+.inventory-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.import-input {
+  display: none;
+}
+
+.import-button {
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #d6d1c4;
+  border-radius: 6px;
+  padding: 0 14px;
+  color: #1e6f5c;
+  background: #e6f1ed;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.import-message {
+  margin: 0 0 10px;
+  color: #1e6f5c;
+  font-weight: 700;
+}
+
+.import-hint {
+  margin: 0 0 14px;
+  font-size: 0.84rem;
+}
+
 .result-list {
   display: grid;
   gap: 8px;

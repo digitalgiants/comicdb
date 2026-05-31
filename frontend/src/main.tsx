@@ -1,6 +1,6 @@
 import React, { FormEvent, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { Edit3, LogOut, Search, Shield, Trash2, UserPlus, Users, Vault } from "lucide-react";
+import { Edit3, LogOut, Search, Shield, Trash2, Upload, UserPlus, Users, Vault } from "lucide-react";
 import "./styles.css";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8084";
@@ -31,6 +31,8 @@ type Comic = {
 
 type ComicDraft = Omit<Comic, "id">;
 type SearchResult = ComicDraft & { source: string; sourceId: string };
+type ImportRow = Record<string, unknown>;
+type ImportResult = { imported: number; skipped: number; errors: { row: number; message: string }[] };
 
 const emptyComic: ComicDraft = {
   title: "",
@@ -47,6 +49,63 @@ const emptyComic: ComicDraft = {
 
 function currency(value: string | number | null | undefined) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Number(value ?? 0));
+}
+
+function parseCsvLine(line: string) {
+  const values: string[] = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    if (char === '"') {
+      if (inQuotes && line[index + 1] === '"') {
+        current += '"';
+        index += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (char === "," && !inQuotes) {
+      values.push(current.trim());
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+
+  values.push(current.trim());
+  return values;
+}
+
+function parseCsv(text: string): ImportRow[] {
+  const lines = text.trim().split(/\r?\n/).filter(Boolean);
+  if (lines.length < 2) {
+    throw new Error("CSV needs a header row and at least one data row.");
+  }
+
+  const headers = parseCsvLine(lines[0]);
+  return lines.slice(1).map((line) => {
+    const values = parseCsvLine(line);
+    return headers.reduce<ImportRow>((row, header, index) => {
+      row[header] = values[index] ?? "";
+      return row;
+    }, {});
+  });
+}
+
+function parseImportFile(text: string, filename: string): ImportRow[] {
+  const lowerName = filename.toLowerCase();
+  if (lowerName.endsWith(".json")) {
+    const data = JSON.parse(text) as unknown;
+    if (Array.isArray(data)) return data as ImportRow[];
+    if (data && typeof data === "object" && Array.isArray((data as { comics?: unknown }).comics)) {
+      return (data as { comics: ImportRow[] }).comics;
+    }
+    throw new Error("JSON must be an array or { comics: [...] }.");
+  }
+
+  if (lowerName.endsWith(".csv")) return parseCsv(text);
+  throw new Error("Use a .csv or .json file.");
 }
 
 function App() {
@@ -153,6 +212,8 @@ function VaultApp({ token, user, onSignOut }: { token: string; user: User; onSig
   const [results, setResults] = useState<SearchResult[]>([]);
   const [activeTab, setActiveTab] = useState<"vault" | "admin">("vault");
   const [message, setMessage] = useState("");
+  const [importMessage, setImportMessage] = useState("");
+  const [importing, setImporting] = useState(false);
 
   const totals = useMemo(() => {
     const currentValue = comics.reduce((sum, comic) => sum + Number(comic.currentPrice ?? 0), 0);
@@ -195,6 +256,27 @@ function VaultApp({ token, user, onSignOut }: { token: string; user: User; onSig
   async function deleteComic(id: string) {
     await api(`/comics/${id}`, token, { method: "DELETE" });
     await loadComics();
+  }
+
+  async function importComics(file: File) {
+    setImportMessage("");
+    setImporting(true);
+    try {
+      const rows = parseImportFile(await file.text(), file.name);
+      const result = await api<ImportResult>("/comics/import", token, {
+        method: "POST",
+        body: JSON.stringify({ comics: rows })
+      });
+      await loadComics();
+      const errorNote = result.errors.length
+        ? ` ${result.errors.length} row${result.errors.length === 1 ? "" : "s"} skipped.`
+        : "";
+      setImportMessage(`Imported ${result.imported} comic${result.imported === 1 ? "" : "s"}.${errorNote}`);
+    } catch (err) {
+      setImportMessage(err instanceof Error ? err.message : "Import failed.");
+    } finally {
+      setImporting(false);
+    }
   }
 
   function editComic(comic: Comic) {
@@ -276,11 +358,16 @@ function VaultApp({ token, user, onSignOut }: { token: string; user: User; onSig
             <div className="panel inventory-panel">
               <div className="inventory-header">
                 <h2>Your inventory</h2>
-                <div className="search-row inventory-search">
-                  <Search size={18} />
-                  <input placeholder="Search your vault" value={query} onChange={(event) => setQuery(event.target.value)} />
+                <div className="inventory-actions">
+                  <ImportButton importing={importing} onImport={importComics} />
+                  <div className="search-row inventory-search">
+                    <Search size={18} />
+                    <input placeholder="Search your vault" value={query} onChange={(event) => setQuery(event.target.value)} />
+                  </div>
                 </div>
               </div>
+              {importMessage && <p className="import-message">{importMessage}</p>}
+              <p className="import-hint muted">CSV or JSON with title, writer, artist, pricePaid, currentPrice, coverUrl, and related fields.</p>
               <div className="comic-grid">
                 {comics.map((comic) => (
                   <article className="comic-card" key={comic.id}>
@@ -309,6 +396,30 @@ function VaultApp({ token, user, onSignOut }: { token: string; user: User; onSig
         </>
       )}
     </main>
+  );
+}
+
+function ImportButton({ importing, onImport }: { importing: boolean; onImport: (file: File) => void }) {
+  const inputId = "comic-import-file";
+
+  return (
+    <>
+      <input
+        id={inputId}
+        className="import-input"
+        type="file"
+        accept=".csv,.json,application/json,text/csv"
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          if (file) onImport(file);
+          event.target.value = "";
+        }}
+      />
+      <label className="import-button" htmlFor={inputId} title="Import CSV or JSON">
+        <Upload size={18} />
+        <span>{importing ? "Importing..." : "Import"}</span>
+      </label>
+    </>
   );
 }
 
