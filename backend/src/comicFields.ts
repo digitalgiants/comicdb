@@ -134,7 +134,14 @@ export function hasComicData(row: ComicFields) {
   return Object.values(row).some((value) => value !== null && value !== undefined && value !== "");
 }
 
-export function comicPriceSearchLabel(comic: ComicFields) {
+export type ComicPriceLabelInput = {
+  name?: string | null;
+  number?: string | null;
+  volume?: string | null;
+  publisher?: string | null;
+};
+
+export function comicPriceSearchLabel(comic: ComicPriceLabelInput) {
   const issue = comic.number ? `#${comic.number}` : "";
   return [comic.name, issue, comic.volume, comic.publisher].filter(Boolean).join(" ").trim();
 }
