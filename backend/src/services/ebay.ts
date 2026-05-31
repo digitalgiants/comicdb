@@ -30,12 +30,12 @@ async function getEbayToken() {
   return tokenCache.token;
 }
 
-export async function estimateCurrentPrice(title: string) {
+export async function estimateAveragePrice(label: string) {
   const token = await getEbayToken();
   if (!token) return null;
 
   const params = new URLSearchParams({
-    q: `${title} comic book`,
+    q: `${label} comic book`,
     limit: "20",
     filter: "buyingOptions:{FIXED_PRICE}"
   });

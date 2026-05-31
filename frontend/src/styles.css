@@ -89,7 +89,8 @@ label {
 }
 
 input,
-select {
+select,
+textarea {
   width: 100%;
   border: 1px solid #d6d1c4;
   border-radius: 6px;
@@ -99,7 +100,8 @@ select {
 }
 
 input:focus,
-select:focus {
+select:focus,
+textarea:focus {
   outline: 3px solid rgba(30, 111, 92, 0.2);
   border-color: #1e6f5c;
 }
@@ -237,6 +239,11 @@ select:focus {
   border: 1px solid #e1ded4;
   border-radius: 8px;
   padding: 18px;
+}
+
+.form-panel {
+  max-height: calc(100vh - 180px);
+  overflow: auto;
 }
 
 .search-row {

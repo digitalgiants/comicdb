@@ -1,80 +1,36 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import {
+  comicDataFromFields,
+  comicFieldSchema,
+  comicPriceSearchLabel,
+  hasComicData,
+  normalizeImportRow,
+  type ComicFields
+} from "../comicFields.js";
 import { requireAuth } from "../auth.js";
 import { prisma } from "../prisma.js";
 import { searchComicVine } from "../services/comicVine.js";
-import { estimateCurrentPrice } from "../services/ebay.js";
+import { estimateAveragePrice } from "../services/ebay.js";
 
-const comicSchema = z.object({
-  title: z.string().min(1),
-  writer: z.string().optional().nullable(),
-  artist: z.string().optional().nullable(),
-  penciler: z.string().optional().nullable(),
-  inker: z.string().optional().nullable(),
-  pricePaid: z.coerce.number().min(0).default(0),
-  currentPrice: z.coerce.number().min(0).default(0),
-  coverUrl: z.string().url().optional().nullable(),
-  source: z.string().optional().nullable(),
-  sourceId: z.string().optional().nullable()
-});
+const searchFields = [
+  "name",
+  "number",
+  "volume",
+  "publisher",
+  "writer",
+  "artist",
+  "pencils",
+  "inker",
+  "coverArtist",
+  "notes"
+] as const;
 
-const comicImportSchema = z.object({
-  title: z.string().min(1),
-  writer: z.string().nullable().optional(),
-  artist: z.string().nullable().optional(),
-  penciler: z.string().nullable().optional(),
-  inker: z.string().nullable().optional(),
-  pricePaid: z.coerce.number().min(0).default(0),
-  currentPrice: z.coerce.number().min(0).default(0),
-  coverUrl: z.string().url().nullable().optional(),
-  source: z.string().nullable().optional(),
-  sourceId: z.string().nullable().optional()
-});
-
-function normalizeKey(key: string) {
-  return key.toLowerCase().replace(/[\s_-]/g, "");
-}
-
-function pickField(raw: Record<string, unknown>, aliases: string[]) {
-  for (const alias of aliases) {
-    const match = Object.keys(raw).find((key) => normalizeKey(key) === normalizeKey(alias));
-    if (!match) continue;
-    const value = raw[match];
-    if (value !== undefined && value !== null && String(value).trim() !== "") return value;
-  }
-  return undefined;
-}
-
-function optionalText(value: unknown) {
-  if (value === undefined || value === null) return null;
-  const text = String(value).trim();
-  return text || null;
-}
-
-function optionalUrl(value: unknown) {
-  const text = optionalText(value);
-  if (!text) return null;
-  try {
-    new URL(text);
-    return text;
-  } catch {
-    return null;
-  }
-}
-
-function normalizeImportRow(raw: Record<string, unknown>) {
-  return {
-    title: optionalText(pickField(raw, ["title", "name", "book", "bookname"])) ?? "",
-    writer: optionalText(pickField(raw, ["writer"])),
-    artist: optionalText(pickField(raw, ["artist"])),
-    penciler: optionalText(pickField(raw, ["penciler", "penciller"])),
-    inker: optionalText(pickField(raw, ["inker"])),
-    pricePaid: pickField(raw, ["pricepaid", "price_paid", "paid"]) ?? 0,
-    currentPrice: pickField(raw, ["currentprice", "current_price", "value", "price"]) ?? 0,
-    coverUrl: optionalUrl(pickField(raw, ["coverurl", "cover_url", "cover"])),
-    source: optionalText(pickField(raw, ["source"])),
-    sourceId: optionalText(pickField(raw, ["sourceid", "source_id"]))
-  };
+async function resolveAveragePrice(input: ComicFields) {
+  if (input.averagePrice != null) return input.averagePrice;
+  const label = comicPriceSearchLabel(input);
+  if (!label) return null;
+  return estimateAveragePrice(label);
 }
 
 export async function comicRoutes(app: FastifyInstance) {
@@ -85,11 +41,9 @@ export async function comicRoutes(app: FastifyInstance) {
         userId: request.currentUser!.id,
         ...(query.q
           ? {
-              OR: [
-                { title: { contains: query.q, mode: "insensitive" } },
-                { writer: { contains: query.q, mode: "insensitive" } },
-                { artist: { contains: query.q, mode: "insensitive" } }
-              ]
+              OR: searchFields.map((field) => ({
+                [field]: { contains: query.q, mode: "insensitive" as const }
+              }))
             }
           : {})
       },
@@ -101,31 +55,23 @@ export async function comicRoutes(app: FastifyInstance) {
     const result = await prisma.comic.aggregate({
       where: { userId: request.currentUser!.id },
       _count: true,
-      _sum: { currentPrice: true, pricePaid: true }
+      _sum: { averagePrice: true, pricePaid: true }
     });
 
     return {
       count: result._count,
-      currentValue: Number(result._sum.currentPrice ?? 0),
+      averageValue: Number(result._sum.averagePrice ?? 0),
       paidValue: Number(result._sum.pricePaid ?? 0)
     };
   });
 
   app.post("/comics", { preHandler: requireAuth }, async (request) => {
-    const input = comicSchema.parse(request.body);
+    const input = comicFieldSchema.parse(request.body);
+    const averagePrice = await resolveAveragePrice(input);
     return prisma.comic.create({
       data: {
         userId: request.currentUser!.id,
-        title: input.title,
-        writer: input.writer,
-        artist: input.artist,
-        penciler: input.penciler,
-        inker: input.inker,
-        pricePaid: input.pricePaid,
-        currentPrice: input.currentPrice,
-        coverUrl: input.coverUrl,
-        source: input.source,
-        sourceId: input.sourceId
+        ...comicDataFromFields({ ...input, averagePrice })
       }
     });
   });
@@ -138,17 +84,21 @@ export async function comicRoutes(app: FastifyInstance) {
       .parse(request.body);
 
     const errors: { row: number; message: string }[] = [];
-    const valid: z.infer<typeof comicImportSchema>[] = [];
+    const valid: ComicFields[] = [];
 
-    body.comics.forEach((raw, index) => {
-      const parsed = comicImportSchema.safeParse(normalizeImportRow(raw));
-      if (!parsed.success) {
-        const message = parsed.error.issues[0]?.message ?? "Invalid row.";
+    for (const [index, raw] of body.comics.entries()) {
+      try {
+        const row = normalizeImportRow(raw);
+        if (!hasComicData(row)) {
+          errors.push({ row: index + 1, message: "Row is empty." });
+          continue;
+        }
+        valid.push(row);
+      } catch (error) {
+        const message = error instanceof z.ZodError ? (error.issues[0]?.message ?? "Invalid row.") : "Invalid row.";
         errors.push({ row: index + 1, message });
-        return;
       }
-      valid.push(parsed.data);
-    });
+    }
 
     if (!valid.length) {
       return reply.code(400).send({
@@ -159,21 +109,17 @@ export async function comicRoutes(app: FastifyInstance) {
       });
     }
 
-    await prisma.comic.createMany({
-      data: valid.map((input) => ({
+    const records = await Promise.all(
+      valid.map(async (input) => ({
         userId: request.currentUser!.id,
-        title: input.title,
-        writer: input.writer,
-        artist: input.artist,
-        penciler: input.penciler,
-        inker: input.inker,
-        pricePaid: input.pricePaid,
-        currentPrice: input.currentPrice,
-        coverUrl: input.coverUrl,
-        source: input.source,
-        sourceId: input.sourceId
+        ...comicDataFromFields({
+          ...input,
+          averagePrice: await resolveAveragePrice(input)
+        })
       }))
-    });
+    );
+
+    await prisma.comic.createMany({ data: records });
 
     return {
       imported: valid.length,
@@ -184,12 +130,13 @@ export async function comicRoutes(app: FastifyInstance) {
 
   app.put("/comics/:id", { preHandler: requireAuth }, async (request, reply) => {
     const params = z.object({ id: z.string() }).parse(request.params);
-    const input = comicSchema.parse(request.body);
+    const input = comicFieldSchema.parse(request.body);
     const existing = await prisma.comic.findFirst({ where: { id: params.id, userId: request.currentUser!.id } });
     if (!existing) return reply.code(404).send({ message: "Comic was not found." });
+
     return prisma.comic.update({
       where: { id: params.id },
-      data: input
+      data: comicDataFromFields(input)
     });
   });
 
@@ -203,13 +150,12 @@ export async function comicRoutes(app: FastifyInstance) {
 
   app.get("/search/comics", { preHandler: requireAuth }, async (request) => {
     const query = z.object({ q: z.string().min(2) }).parse(request.query);
-    const results = await searchComicVine(query.q);
-    return results;
+    return searchComicVine(query.q);
   });
 
   app.get("/search/price", { preHandler: requireAuth }, async (request) => {
-    const query = z.object({ title: z.string().min(2) }).parse(request.query);
-    const price = await estimateCurrentPrice(query.title);
+    const query = z.object({ q: z.string().min(2) }).parse(request.query);
+    const price = await estimateAveragePrice(query.q);
     return { price };
   });
 }

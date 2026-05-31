@@ -5,6 +5,36 @@ import "./styles.css";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8084";
 
+const COMIC_IMPORT_HEADERS =
+  "name, number, Date, Volume, direct, Publisher, no. of books, print, print ratio, Cover, variant, writer, artist, Pencils, inker, cover artist, average price, price paid, buy date, sell date, point of purchase, signed, remarked, notes";
+
+const COMIC_FORM_FIELDS = [
+  { key: "name", label: "Name" },
+  { key: "number", label: "Number" },
+  { key: "date", label: "Date" },
+  { key: "volume", label: "Volume" },
+  { key: "direct", label: "Direct" },
+  { key: "publisher", label: "Publisher" },
+  { key: "numberOfBooks", label: "No. of books" },
+  { key: "print", label: "Print" },
+  { key: "printRatio", label: "Print ratio" },
+  { key: "cover", label: "Cover" },
+  { key: "variant", label: "Variant" },
+  { key: "writer", label: "Writer" },
+  { key: "artist", label: "Artist" },
+  { key: "pencils", label: "Pencils" },
+  { key: "inker", label: "Inker" },
+  { key: "coverArtist", label: "Cover artist" },
+  { key: "averagePrice", label: "Average price", type: "number" as const },
+  { key: "pricePaid", label: "Price paid", type: "number" as const },
+  { key: "buyDate", label: "Buy date" },
+  { key: "sellDate", label: "Sell date" },
+  { key: "pointOfPurchase", label: "Point of purchase" },
+  { key: "signed", label: "Signed" },
+  { key: "remarked", label: "Remarked" },
+  { key: "notes", label: "Notes", type: "textarea" as const }
+] as const;
+
 type Role = "ADMIN" | "USER";
 
 type User = {
@@ -17,38 +47,104 @@ type User = {
 
 type Comic = {
   id: string;
-  title: string;
+  name?: string | null;
+  number?: string | null;
+  date?: string | null;
+  volume?: string | null;
+  direct?: string | null;
+  publisher?: string | null;
+  numberOfBooks?: string | null;
+  print?: string | null;
+  printRatio?: string | null;
+  cover?: string | null;
+  variant?: string | null;
   writer?: string | null;
   artist?: string | null;
-  penciler?: string | null;
+  pencils?: string | null;
   inker?: string | null;
-  pricePaid: string | number;
-  currentPrice: string | number;
-  coverUrl?: string | null;
-  source?: string | null;
-  sourceId?: string | null;
+  coverArtist?: string | null;
+  averagePrice?: string | number | null;
+  pricePaid?: string | number | null;
+  buyDate?: string | null;
+  sellDate?: string | null;
+  pointOfPurchase?: string | null;
+  signed?: string | null;
+  remarked?: string | null;
+  notes?: string | null;
 };
 
 type ComicDraft = Omit<Comic, "id">;
-type SearchResult = ComicDraft & { source: string; sourceId: string };
+type SearchResult = {
+  source: "comicvine";
+  sourceId: string;
+  displayTitle: string;
+  coverImageUrl?: string;
+} & ComicDraft;
 type ImportRow = Record<string, unknown>;
 type ImportResult = { imported: number; skipped: number; errors: { row: number; message: string }[] };
 
 const emptyComic: ComicDraft = {
-  title: "",
+  name: "",
+  number: "",
+  date: "",
+  volume: "",
+  direct: "",
+  publisher: "",
+  numberOfBooks: "",
+  print: "",
+  printRatio: "",
+  cover: "",
+  variant: "",
   writer: "",
   artist: "",
-  penciler: "",
+  pencils: "",
   inker: "",
-  pricePaid: 0,
-  currentPrice: 0,
-  coverUrl: "",
-  source: "",
-  sourceId: ""
+  coverArtist: "",
+  averagePrice: "",
+  pricePaid: "",
+  buyDate: "",
+  sellDate: "",
+  pointOfPurchase: "",
+  signed: "",
+  remarked: "",
+  notes: ""
 };
 
 function currency(value: string | number | null | undefined) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Number(value ?? 0));
+}
+
+function comicDisplayName(comic: Pick<Comic, "name" | "number" | "volume">) {
+  const issue = comic.number ? `#${comic.number}` : "";
+  return [comic.name, issue, comic.volume].filter(Boolean).join(" ") || "Untitled comic";
+}
+
+function comicPriceSearchLabel(comic: ComicDraft) {
+  const issue = comic.number ? `#${comic.number}` : "";
+  return [comic.name, issue, comic.volume, comic.publisher].filter(Boolean).join(" ").trim();
+}
+
+function normalizeDraftForSave(draft: ComicDraft): ComicDraft {
+  const next = { ...draft };
+  for (const field of COMIC_FORM_FIELDS) {
+    const value = next[field.key as keyof ComicDraft];
+    if (field.type === "number") {
+      next[field.key as keyof ComicDraft] = value === "" || value == null ? null : Number(value);
+    } else if (value === "") {
+      next[field.key as keyof ComicDraft] = null;
+    }
+  }
+  return next;
+}
+
+function draftFromComic(comic: Comic): ComicDraft {
+  const draft = { ...emptyComic };
+  for (const field of COMIC_FORM_FIELDS) {
+    const value = comic[field.key as keyof Comic];
+    draft[field.key as keyof ComicDraft] =
+      field.type === "number" ? (value == null || value === "" ? "" : Number(value)) : (value ?? "");
+  }
+  return draft;
 }
 
 function parseCsvLine(line: string) {
@@ -216,9 +312,9 @@ function VaultApp({ token, user, onSignOut }: { token: string; user: User; onSig
   const [importing, setImporting] = useState(false);
 
   const totals = useMemo(() => {
-    const currentValue = comics.reduce((sum, comic) => sum + Number(comic.currentPrice ?? 0), 0);
+    const averageValue = comics.reduce((sum, comic) => sum + Number(comic.averagePrice ?? 0), 0);
     const paidValue = comics.reduce((sum, comic) => sum + Number(comic.pricePaid ?? 0), 0);
-    return { currentValue, paidValue, gain: currentValue - paidValue };
+    return { averageValue, paidValue, gain: averageValue - paidValue };
   }, [comics]);
 
   useEffect(() => {
@@ -237,16 +333,18 @@ function VaultApp({ token, user, onSignOut }: { token: string; user: User; onSig
     if (!found.length) setMessage("No online matches found yet. Add API keys or enter the comic manually.");
   }
 
-  async function estimatePrice(title = draft.title) {
-    if (!title) return;
-    const data = await api<{ price: number | null }>(`/search/price?title=${encodeURIComponent(title)}`, token);
-    if (data.price) setDraft((current) => ({ ...current, currentPrice: data.price ?? 0 }));
+  async function estimatePrice(nextDraft = draft) {
+    const label = comicPriceSearchLabel(nextDraft);
+    if (!label) return;
+    const data = await api<{ price: number | null }>(`/search/price?q=${encodeURIComponent(label)}`, token);
+    if (data.price != null) setDraft((current) => ({ ...current, averagePrice: data.price ?? "" }));
   }
 
   async function saveComic(event: FormEvent) {
     event.preventDefault();
     const path = editingId ? `/comics/${editingId}` : "/comics";
-    await api(path, token, { method: editingId ? "PUT" : "POST", body: JSON.stringify(draft) });
+    const payload = normalizeDraftForSave(draft);
+    await api(path, token, { method: editingId ? "PUT" : "POST", body: JSON.stringify(payload) });
     setDraft(emptyComic);
     setEditingId(null);
     setResults([]);
@@ -281,24 +379,26 @@ function VaultApp({ token, user, onSignOut }: { token: string; user: User; onSig
 
   function editComic(comic: Comic) {
     setEditingId(comic.id);
-    setDraft({
-      title: comic.title,
-      writer: comic.writer ?? "",
-      artist: comic.artist ?? "",
-      penciler: comic.penciler ?? "",
-      inker: comic.inker ?? "",
-      pricePaid: Number(comic.pricePaid),
-      currentPrice: Number(comic.currentPrice),
-      coverUrl: comic.coverUrl ?? "",
-      source: comic.source ?? "",
-      sourceId: comic.sourceId ?? ""
-    });
+    setDraft(draftFromComic(comic));
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   function useResult(result: SearchResult) {
-    setDraft({ ...emptyComic, ...result, pricePaid: 0, currentPrice: 0 });
-    estimatePrice(result.title);
+    const nextDraft = {
+      ...emptyComic,
+      name: result.name ?? "",
+      number: result.number ?? "",
+      date: result.date ?? "",
+      volume: result.volume ?? "",
+      publisher: result.publisher ?? "",
+      writer: result.writer ?? "",
+      artist: result.artist ?? "",
+      pencils: result.pencils ?? "",
+      inker: result.inker ?? "",
+      coverArtist: result.coverArtist ?? ""
+    };
+    setDraft(nextDraft);
+    estimatePrice(nextDraft);
   }
 
   return (
@@ -327,7 +427,7 @@ function VaultApp({ token, user, onSignOut }: { token: string; user: User; onSig
         <>
           <section className="dashboard">
             <Stat label="Books" value={String(comics.length)} />
-            <Stat label="Current value" value={currency(totals.currentValue)} />
+            <Stat label="Average value" value={currency(totals.averageValue)} />
             <Stat label="Paid" value={currency(totals.paidValue)} />
             <Stat label="Difference" value={currency(totals.gain)} />
           </section>
@@ -346,8 +446,8 @@ function VaultApp({ token, user, onSignOut }: { token: string; user: User; onSig
                 <div className="result-list">
                   {results.map((result) => (
                     <button key={result.sourceId} onClick={() => useResult(result)}>
-                      {result.coverUrl && <img src={result.coverUrl} alt="" />}
-                      <span>{result.title}</span>
+                      {result.coverImageUrl && <img src={result.coverImageUrl} alt="" />}
+                      <span>{result.displayTitle}</span>
                     </button>
                   ))}
                 </div>
@@ -367,16 +467,19 @@ function VaultApp({ token, user, onSignOut }: { token: string; user: User; onSig
                 </div>
               </div>
               {importMessage && <p className="import-message">{importMessage}</p>}
-              <p className="import-hint muted">CSV or JSON with title, writer, artist, pricePaid, currentPrice, coverUrl, and related fields.</p>
+              <p className="import-hint muted">CSV or JSON columns: {COMIC_IMPORT_HEADERS}</p>
               <div className="comic-grid">
                 {comics.map((comic) => (
                   <article className="comic-card" key={comic.id}>
-                    <div className="cover-frame">{comic.coverUrl ? <img src={comic.coverUrl} alt="" /> : <Vault size={48} />}</div>
+                    <div className="cover-frame">
+                      <Vault size={48} />
+                    </div>
                     <div className="comic-body">
-                      <h3>{comic.title}</h3>
+                      <h3>{comicDisplayName(comic)}</h3>
+                      <p>{comic.publisher || "Publisher pending"}</p>
                       <p>{[comic.writer, comic.artist].filter(Boolean).join(" / ") || "Creator details pending"}</p>
                       <div className="price-row">
-                        <span>{currency(comic.currentPrice)}</span>
+                        <span>{currency(comic.averagePrice)}</span>
                         <small>paid {currency(comic.pricePaid)}</small>
                       </div>
                       <div className="card-actions">
@@ -425,24 +528,36 @@ function ImportButton({ importing, onImport }: { importing: boolean; onImport: (
 
 function ComicForm({ draft, setDraft, onSubmit, onEstimate, editing }: { draft: ComicDraft; setDraft: (draft: ComicDraft) => void; onSubmit: (event: FormEvent) => void; onEstimate: () => void; editing: boolean }) {
   const set = (key: keyof ComicDraft, value: string | number) => setDraft({ ...draft, [key]: value });
+
   return (
     <form className="comic-form" onSubmit={onSubmit}>
-      <label>Book name<input value={draft.title} onChange={(event) => set("title", event.target.value)} required /></label>
-      <div className="field-pair">
-        <label>Writer<input value={draft.writer ?? ""} onChange={(event) => set("writer", event.target.value)} /></label>
-        <label>Artist<input value={draft.artist ?? ""} onChange={(event) => set("artist", event.target.value)} /></label>
-      </div>
-      <div className="field-pair">
-        <label>Penciler<input value={draft.penciler ?? ""} onChange={(event) => set("penciler", event.target.value)} /></label>
-        <label>Inker<input value={draft.inker ?? ""} onChange={(event) => set("inker", event.target.value)} /></label>
-      </div>
-      <div className="field-pair">
-        <label>Price paid<input type="number" min="0" step="0.01" value={draft.pricePaid} onChange={(event) => set("pricePaid", event.target.value)} /></label>
-        <label>Current price<input type="number" min="0" step="0.01" value={draft.currentPrice} onChange={(event) => set("currentPrice", event.target.value)} /></label>
-      </div>
-      <label>Cover image URL<input value={draft.coverUrl ?? ""} onChange={(event) => set("coverUrl", event.target.value)} /></label>
+      {COMIC_FORM_FIELDS.map((field) => {
+        const value = draft[field.key as keyof ComicDraft] ?? "";
+        if (field.type === "textarea") {
+          return (
+            <label key={field.key}>
+              {field.label}
+              <textarea value={String(value)} onChange={(event) => set(field.key as keyof ComicDraft, event.target.value)} rows={3} />
+            </label>
+          );
+        }
+        if (field.type === "number") {
+          return (
+            <label key={field.key}>
+              {field.label}
+              <input type="number" min="0" step="0.01" value={value === null ? "" : value} onChange={(event) => set(field.key as keyof ComicDraft, event.target.value)} />
+            </label>
+          );
+        }
+        return (
+          <label key={field.key}>
+            {field.label}
+            <input value={String(value)} onChange={(event) => set(field.key as keyof ComicDraft, event.target.value)} />
+          </label>
+        );
+      })}
       <div className="form-actions">
-        <button className="secondary" type="button" onClick={onEstimate}>Estimate value</button>
+        <button className="secondary" type="button" onClick={onEstimate}>Fetch average price</button>
         <button className="primary" type="submit">{editing ? "Save changes" : "Add book"}</button>
       </div>
     </form>

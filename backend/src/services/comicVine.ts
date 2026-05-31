@@ -3,7 +3,7 @@ import { env } from "../env.js";
 type ComicVineResult = {
   id: number;
   name?: string;
-  volume?: { name?: string };
+  volume?: { name?: string; publisher?: { name?: string } };
   issue_number?: string;
   cover_date?: string;
   image?: { original_url?: string; small_url?: string };
@@ -13,12 +13,18 @@ type ComicVineResult = {
 export type ComicSearchResult = {
   source: "comicvine";
   sourceId: string;
-  title: string;
+  displayTitle: string;
+  coverImageUrl?: string;
+  name?: string;
+  number?: string;
+  date?: string;
+  volume?: string;
+  publisher?: string;
   writer?: string;
   artist?: string;
-  penciler?: string;
+  pencils?: string;
   inker?: string;
-  coverUrl?: string;
+  coverArtist?: string;
 };
 
 function namesByRole(credits: ComicVineResult["person_credits"], roleName: string) {
@@ -57,12 +63,18 @@ export async function searchComicVine(query: string): Promise<ComicSearchResult[
     return {
       source: "comicvine",
       sourceId: String(comic.id),
-      title: `${baseTitle}${issue}${year}`,
+      displayTitle: `${baseTitle}${issue}${year}`,
+      coverImageUrl: comic.image?.original_url ?? comic.image?.small_url,
+      name: comic.volume?.name ?? comic.name,
+      number: comic.issue_number,
+      date: comic.cover_date ?? undefined,
+      volume: comic.volume?.name,
+      publisher: comic.volume?.publisher?.name,
       writer: namesByRole(comic.person_credits, "writer"),
       artist: namesByRole(comic.person_credits, "artist"),
-      penciler: namesByRole(comic.person_credits, "penciler"),
+      pencils: namesByRole(comic.person_credits, "penciler"),
       inker: namesByRole(comic.person_credits, "inker"),
-      coverUrl: comic.image?.original_url ?? comic.image?.small_url
+      coverArtist: namesByRole(comic.person_credits, "cover")
     };
   });
 }
