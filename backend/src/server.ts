@@ -19,13 +19,21 @@ await app.register(jwt, {
   secret: env.jwtSecret
 });
 
+function errorStatusCode(error: unknown) {
+  if (typeof error === "object" && error !== null && "statusCode" in error) {
+    const statusCode = (error as { statusCode?: unknown }).statusCode;
+    if (typeof statusCode === "number") return statusCode;
+  }
+  return 500;
+}
+
 app.setErrorHandler((error, _request, reply) => {
   if (error instanceof ZodError) {
     return reply.code(400).send({ message: "Please check the form fields.", issues: error.issues });
   }
   app.log.error(error);
 
-  const statusCode = "statusCode" in error && typeof error.statusCode === "number" ? error.statusCode : 500;
+  const statusCode = errorStatusCode(error);
   const message = error instanceof Error ? error.message : "Something went wrong.";
 
   if (message.includes("coverImageUrl") || message.includes("does not exist")) {
